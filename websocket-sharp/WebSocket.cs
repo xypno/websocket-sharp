@@ -44,6 +44,9 @@ using System.Threading;
 using WebSocketSharp.Net;
 using WebSocketSharp.Net.WebSockets;
 
+// External libraries
+using Starksoft.Net.Proxy;
+
 namespace WebSocketSharp {
 
   /// <summary>
@@ -60,6 +63,9 @@ namespace WebSocketSharp {
     private const int    _fragmentLen = 1016; // Max value is int.MaxValue - 14.
     private const string _guid        = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     private const string _version     = "13";
+
+    // for local debug
+//    private const string _logPath     = @"C:\Work\logs\websocket.log";
 
     #endregion
 
@@ -87,6 +93,12 @@ namespace WebSocketSharp {
     private TcpClient         _tcpClient;
     private Uri               _uri;
     private WsStream          _wsStream;
+    private StreamWriter      _logWriter;
+
+    // R.Honma customize for using proxy
+    private bool              _useProxy;
+    private string            _proxyHost;
+    private int               _proxyPort;
 
     #endregion
 
@@ -94,6 +106,10 @@ namespace WebSocketSharp {
 
     private WebSocket()
     {
+      // for local debug
+//      _logWriter = new StreamWriter(_logPath, true, System.Text.Encoding.GetEncoding("Shift_JIS"));
+//      Console.SetOut(_logWriter);
+
       _compression = CompressionMethod.NONE;
       _cookies = new CookieCollection();
       _extensions = String.Empty;
@@ -104,6 +120,17 @@ namespace WebSocketSharp {
       _preAuth = false;
       _protocol = String.Empty;
       _readyState = WsState.CONNECTING;
+
+      // R.Honma customize for using proxy
+      _useProxy = false;
+      _proxyHost = String.Empty;
+      _proxyPort = 0;
+
+    }
+
+    ~WebSocket()
+    {
+//      _logWriter.Dispose();
     }
 
     #endregion
@@ -394,6 +421,45 @@ namespace WebSocketSharp {
       internal set {
         if (_readyState == WsState.CONNECTING && !_client)
           _uri = value;
+      }
+    }
+
+    /// <summary>
+    /// Get whether use proxy or not
+    /// </summary>
+    public bool UseProxy
+    {
+      get {
+        return _useProxy;
+      }
+      set {
+        _useProxy = value;
+      }
+    }
+
+    /// <summary>
+    /// Gets proxt host
+    /// </summary>
+    public string ProxyHost
+    {
+      get {
+        return _proxyHost;
+      }
+      set {
+        _proxyHost = value;
+      }
+    }
+
+    /// <summary>
+    /// Gets proxy port
+    /// </summary>
+    public int ProxyPort
+    {
+      get {
+        return _proxyPort;
+      }
+      set {
+        _proxyPort = value;
       }
     }
 
@@ -759,8 +825,19 @@ namespace WebSocketSharp {
 
       var host = _uri.DnsSafeHost;
       var port = _uri.Port;
-      _tcpClient = new TcpClient(host, port);
+      Console.WriteLine("WS: host={0}, port={1}", host, port);
+
+      // R.Honma customize for using proxy
+      if (_useProxy) {
+        HttpProxyClient httpClient = new HttpProxyClient(_proxyHost, _proxyPort);
+        _tcpClient = httpClient.CreateConnection(host, port);
+//        _tcpClient = new TcpClient(_proxyHost, _proxyPort);
+      } else {
+        _tcpClient = new TcpClient(host, port);
+      }
+      Console.WriteLine("WS: init(1)");
       _wsStream = WsStream.CreateClientStream(_tcpClient, host, _secure);
+      Console.WriteLine("WS: init(2)");
     }
 
     // As server
@@ -855,6 +932,9 @@ namespace WebSocketSharp {
       var callerFrame = new StackFrame(1);
       var caller      = callerFrame.GetMethod();
       Console.WriteLine("WS: Error@{0}: {1}", caller.Name, message);
+      string trace = Environment.StackTrace;
+      Console.WriteLine(trace);
+
       #endif
       OnError.Emit(this, new ErrorEventArgs(message));
     }
@@ -1464,8 +1544,9 @@ namespace WebSocketSharp {
         if (connect())
           onOpen();
       }
-      catch
+      catch (Exception ex)
       {
+        Console.WriteLine(ex.Message);
         var msg = "An exception has occured.";
         onError(msg);
         Close(CloseStatusCode.ABNORMAL, msg);
